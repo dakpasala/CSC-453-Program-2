@@ -448,7 +448,7 @@ void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, in
                 p->state = RUNNING;
                 cpu->current_process = p;
 
-                return; // apparently only one is possible so just return after oine
+                return; // apparently only one is possible so just return after done
             }
         }
     }
