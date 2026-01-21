@@ -405,6 +405,24 @@ void handle_rr_quantum_expiry(Process *processes, CPU *cpus, int cpu_count, int 
                            ReadyQueue *ready_queue, int current_time) {
     // TODO: Move Round Robin processes back to the queue when their quantum expires
     (void)current_time; // Explicitly mark as unused
+    
+    for (int i = 0; i < cpu_count; i++) {
+        CPU *cpu = &cpus[i];
+        Process *p = cpu->current_process;
+
+        // validation
+        if (p == NULL) continue;
+
+        // bruh this just checking if it's past its interval and moving to queue
+        if (p->quantum_used >= time_quantum && p->finish_time > 0) {
+            p->quantum_used = 0;
+            p->state = READY;
+
+            // add to queue and done
+            enqueue(ready_queue, p - processes);
+            cpu->current_process = NULL;
+        }
+    }
 }
 
 /**
