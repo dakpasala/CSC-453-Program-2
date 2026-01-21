@@ -443,8 +443,37 @@ void update_waiting_times(Process *processes, int process_count, int current_tim
 void execute_processes(Process *processes, int process_count, CPU *cpus, int cpu_count,
                      int current_time, int *completed_count) {
     // TODO: Execute one time unit of each running process and track CPU idle/busy time
-    (void)processes;
-    (void)process_count;
+    
+    for (int i = 0; i < cpus; i++) {
+        CPU *cpu = &cpus[i];
+
+        if (cpu->current_process != NULL) {
+            // look at current process
+            Process *p = cpu->current_process;
+
+            // if process doesn't have start time, use current time
+            if (p->start_time == -1) {
+                p->start_time = current_time;
+                p->response_time = current_time - p->arrival_time;
+            }
+            
+            // reduce time available and increment busy time of the CPU
+            p->remaining_time--;
+            cpu->busy_time++;
+
+            // this is only for RR i believe, this doesn't matter for everything else
+            p->quantum_used++;
+            
+            // basic syntax just get rid of process and increment
+            if (p->remaining_time == 0) {
+                p->finish_time = current_time + 1;
+                p->state = COMPLETED;
+                cpu->current_process = NULL;
+                (*completed_count)++;
+            }
+        }
+        else cpu->idle_time++; // obviously nothing else u can do, it's just idle
+    }
 }
 
 /************************* MAIN SIMULATION *************************/
