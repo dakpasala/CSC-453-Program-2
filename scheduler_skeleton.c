@@ -430,6 +430,11 @@ void assign_processes_to_idle_cpus(Process *processes, int process_count, CPU *c
  */
 void update_waiting_times(Process *processes, int process_count, int current_time) {
     // TODO: Increment waiting_time for processes that have arrived but are not running
+
+    for (int i = 0; i < process_count; i++) {
+        if (processes[i].state != RUNNING && processes[i].state != COMPLETED && processes[i].arrival_time < current_time)
+            processes[i].waiting_time++;
+    }
 }
 
 /**
