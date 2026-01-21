@@ -413,6 +413,45 @@ void handle_rr_quantum_expiry(Process *processes, CPU *cpus, int cpu_count, int 
 void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, int cpu_count, int current_time) {
     // TODO: Implement preemption logic for SRTF: replace running processes if a ready process is shorter
     // Consider priority as a tiebreaker when remaining times are equal
+
+
+    (void)current_time;
+
+    // this o(n^2) is gonna pmo
+    for (int i = 0; i < process_count; i++) {
+        Process *p = &processes[i];
+        
+        // validate whether process is valid to work with
+        if (p->state != WAITING && p->state != READY) continue;
+        if (p->remaining_time <= 0) continue;
+
+        for (int c = 0; c < cpu_count; c++) {
+            CPU *cpu = &cpus[c];
+            if (cpu->current_process == NULL) continue;
+
+            Process *running = cpu->current_process;
+            bool replace = false;
+
+            // if less, this works
+            if (p->remaining_time < running->remaining_time) replace = true;
+            else if (p->remaining_time == running->remaining_time) { // tie breakers
+                if (p->priority > running->priority) replace = true;
+                else if (p->priority == running->priority && p->pid < running->pid) replace = true;
+            }
+
+            if (replace) {
+                // pause current process
+                running->state = WAITING;
+                running->quantum_used = 0;
+
+                // make curr process p
+                p->state = RUNNING;
+                cpu->current_process = p;
+
+                return; // apparently only one is possible so just return after oine
+            }
+        }
+    }
 }
 
 /**
