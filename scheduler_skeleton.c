@@ -386,7 +386,16 @@ void handle_arrivals(Process *processes, int process_count, int current_time, Al
                    int *arrived_indices, int *arrival_count) {
     // TODO: Find and record processes that have arrived at the current time
     // Remember to handle state transitions appropriately for each algorithm type
-    *arrival_count = 0; // Initialize arrival count
+
+    *arrival_count = 0;
+    
+    for (int i = 0; i < process_count; i++) {
+        if (processes[i].arrival_time == current_time && processes[i].state == WAITING) {
+            if (algorithm == 1) processes[i].state = READY;
+            arrived_indices[*arrival_count] = i;
+            (*arrival_count)++;
+        }
+    }
 }
 
 /**
@@ -743,7 +752,9 @@ int main(int argc, char *argv[]) {
     Algorithm algorithm = FCFS;
     int cpu_count = 1;
     int time_quantum = DEFAULT_TIME_QUANTUM;
-    char *input_file = NULL;
+
+    // changed to take in 2nd argument from command line
+    char *input_file = argv[1];
 
     // Parse command line arguments
     parse_arguments(argc, argv, &algorithm, &cpu_count, &time_quantum, &input_file);
