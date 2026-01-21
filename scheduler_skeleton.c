@@ -391,7 +391,7 @@ void handle_arrivals(Process *processes, int process_count, int current_time, Al
     
     for (int i = 0; i < process_count; i++) {
         if (processes[i].arrival_time == current_time && processes[i].state == WAITING) {
-            if (algorithm == 1) processes[i].state = READY;
+            if (algorithm == RR) processes[i].state = READY;
             arrived_indices[*arrival_count] = i;
             (*arrival_count)++;
         }
