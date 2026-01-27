@@ -388,7 +388,7 @@ void handle_arrivals(Process *processes, int process_count, int current_time, Al
     // Remember to handle state transitions appropriately for each algorithm type
 
     *arrival_count = 0;
-    
+    // Arrived indices is used by RR to enqueue processes, the other algorithms don't need it
     for (int i = 0; i < process_count; i++) {
         if (processes[i].arrival_time == current_time && processes[i].state == WAITING) {
             if (algorithm == RR) processes[i].state = READY;
@@ -405,6 +405,19 @@ void handle_rr_quantum_expiry(Process *processes, CPU *cpus, int cpu_count, int 
                            ReadyQueue *ready_queue, int current_time) {
     // TODO: Move Round Robin processes back to the queue when their quantum expires
     (void)current_time; // Explicitly mark as unused
+
+    for (int i = 0; i < cpu_count; i++) {
+        CPU *cpu = &cpus[i];
+        Process *p = cpu->current_process;
+
+        if (p != NULL && p->quantum_used >= time_quantum) {
+            int process_index = p - processes;  // Pointer arithmetic gives you the index
+            enqueue(ready_queue, process_index);
+            p->quantum_used = 0;
+            p->state = READY;
+            cpu->current_process = NULL;
+        }
+    }
 }
 
 /**
@@ -418,6 +431,9 @@ void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, in
     (void)current_time;
 
     // this o(n^2) is gonna pmo
+
+    // Edge case: WAIT processes in decreasing order of remaining time will preempt same CPU multiple times in one tick
+    bool preempted[cpu_count];
     for (int i = 0; i < process_count; i++) {
         Process *p = &processes[i];
         
@@ -426,6 +442,7 @@ void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, in
         if (p->remaining_time <= 0) continue;
 
         for (int c = 0; c < cpu_count; c++) {
+            if (preempted[c]) continue;  // Skip, CPUs already preempted this tick
             CPU *cpu = &cpus[c];
             if (cpu->current_process == NULL) continue;
 
@@ -447,7 +464,12 @@ void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, in
                 // make curr process p
                 p->state = RUNNING;
                 cpu->current_process = p;
-
+                preempted[c] = true;
+                
+                // IDK if this statement is true, imagine 2 processes on cpu that 
+                // just recently got their remaining time decremented and 2 processes
+                // in the waiting queue that are shorter than both, both should be swapped out.
+                // I suggest putting a break instead.
                 return; // apparently only one is possible so just return after done
             }
         }
@@ -470,6 +492,8 @@ void assign_processes_to_idle_cpus(Process *processes, int process_count, CPU *c
 void update_waiting_times(Process *processes, int process_count, int current_time) {
     // TODO: Increment waiting_time for processes that have arrived but are not running
 
+    // The enum comment for WAITING (“not yet scheduled or arrived”) is misleading
+    // ask prof if WAITING state is considered as arrived 
     for (int i = 0; i < process_count; i++) {
         if (processes[i].state != RUNNING && processes[i].state != COMPLETED && processes[i].arrival_time < current_time)
             processes[i].waiting_time++;
@@ -483,7 +507,7 @@ void execute_processes(Process *processes, int process_count, CPU *cpus, int cpu
                      int current_time, int *completed_count) {
     // TODO: Execute one time unit of each running process and track CPU idle/busy time
     
-    for (int i = 0; i < cpus; i++) {
+    for (int i = 0; i < cpu_count; i++) {
         CPU *cpu = &cpus[i];
 
         if (cpu->current_process != NULL) {
@@ -825,9 +849,7 @@ int main(int argc, char *argv[]) {
     Algorithm algorithm = FCFS;
     int cpu_count = 1;
     int time_quantum = DEFAULT_TIME_QUANTUM;
-
-    // changed to take in 2nd argument from command line
-    char *input_file = argv[1];
+    char *input_file = NULL;
 
     // Parse command line arguments
     parse_arguments(argc, argv, &algorithm, &cpu_count, &time_quantum, &input_file);
