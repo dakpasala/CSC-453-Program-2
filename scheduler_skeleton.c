@@ -427,7 +427,7 @@ void handle_rr_quantum_expiry(Process *processes, CPU *cpus, int cpu_count, int 
  * 2. Priority (higher is better, if remaining time is equal)
  * 3. PID (lower is better, if priority is equal)
  */
-bool priority_comparator(Process *p1, Process *p2) {
+bool remaining_time_priority_comparator(Process *p1, Process *p2) {
     if (p1->remaining_time != p2->remaining_time) {
         return p1->remaining_time < p2->remaining_time;
     }
@@ -437,6 +437,29 @@ bool priority_comparator(Process *p1, Process *p2) {
     return p1->pid < p2->pid;
 }
 
+bool burst_time_priority_comparator(Process *p1, Process *p2) {
+    if (p1->burst_time != p2->burst_time) {
+        return p1->burst_time < p2->burst_time;
+    }
+    if (p1->priority != p2->priority) {
+        return p1->priority > p2->priority;
+    }
+    return p1->pid < p2->pid;
+}
+
+Process *find_valid_min_remaining_process(Process *processes, int process_count, int current_time) {
+    Process *min_process = NULL;
+    for (int i = 0; i < process_count; i++) {
+        Process *p = &processes[i];
+        if (p->remaining_time <= 0 || p->state != WAITING || p->arrival_time > current_time) continue; // skip invalid processes
+        if (p->state == WAITING) {
+            if (min_process == NULL || remaining_time_priority_comparator(p, min_process)) {
+                min_process = p;
+            }
+        }
+    }
+    return min_process;
+}
 /**
  * Implement preemptive scheduling for SRTF
  */
@@ -445,23 +468,12 @@ void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, in
     // Consider priority as a tiebreaker when remaining times are equal
 
     (void)current_time;
-    // Finds the minimum remaining time process that is WAITING or READY and replaces
+    // Finds the minimum remaining time process that is WAITING and replaces
     // a running process if it has less remaining time. Continues until no more replacements
     // can be made.
     bool found_replacement = true;
     while (found_replacement) {
-        Process *min_process = NULL;
-        for (int i = 0; i < process_count; i++) {
-            Process *p = &processes[i];
-        
-            // validate whether process is valid to work with
-            if (p->state != WAITING && p->state != READY) continue;
-            if (p->remaining_time <= 0) continue;
-
-            if (min_process == NULL || priority_comparator(p, min_process)) {
-                min_process = p;
-            }
-        }
+        Process *min_process = find_valid_min_remaining_process(processes, process_count, current_time);
 
         if (min_process == NULL) break; // no valid process found
 
@@ -473,7 +485,7 @@ void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, in
             Process *running = cpu->current_process;
             bool replace = false;
 
-            if (priority_comparator(min_process, running)) {
+            if (remaining_time_priority_comparator(min_process, running)) {
                 // pause current process
                 running->state = WAITING;
                 running->quantum_used = 0; // not rr but just in case
@@ -498,6 +510,57 @@ void assign_processes_to_idle_cpus(Process *processes, int process_count, CPU *c
     // TODO: Select and assign processes to idle CPUs according to the chosen algorithm
     // Each algorithm has different process selection criteria
     // Be careful not to assign the same process to multiple CPUs
+    for (int c = 0; c < cpu_count; c++) {
+        CPU *cpu = &cpus[c];
+
+        if (cpu->current_process != NULL) continue; // CPU is busy
+        switch (algorithm) {
+            case FCFS:
+                for (int i = 0; i < process_count; i++) {
+                    Process *p = &processes[i];
+                    if (p->state == WAITING && p->arrival_time <= current_time) {
+                        p->state = RUNNING;
+                        cpu->current_process = p;
+                        break; // Assigned one process, move to next CPU
+                    }
+                }
+                break;
+            case RR:
+                int process_idx = dequeue(ready_queue);
+                if (process_idx != -1) {
+                    Process *p = &processes[process_idx];
+                    p->state = RUNNING;
+                    cpu->current_process = p;
+                }
+                break;
+            case SRTF:
+                Process *p = find_valid_min_remaining_process(processes, process_count, current_time);
+                if (p != NULL) {
+                    p->state = RUNNING;
+                    cpu->current_process = p;
+                }
+                break;
+            case SJF:
+                Process *shortest_process = NULL;
+                for (int i = 0; i < process_count; i++) {
+                    Process *p = &processes[i];
+                    if (p->remaining_time <= 0 || p->state != WAITING || p->arrival_time > current_time) continue; // skip invalid processes
+                    
+                    if (shortest_process == NULL || burst_time_priority_comparator(p, shortest_process)) {
+                        shortest_process = p;
+                    }
+                }
+
+                if (shortest_process != NULL) {
+                    shortest_process->state = RUNNING;
+                    cpu->current_process = shortest_process;
+                }
+                break;
+            default:
+                break;
+        }
+
+    }
 }
 
 /**
@@ -542,7 +605,7 @@ void execute_processes(Process *processes, int process_count, CPU *cpus, int cpu
             p->quantum_used++;
             
             // basic syntax just get rid of process and increment
-            if (p->remaining_time == 0) {
+            if (p->remaining_time <= 0) {
                 p->finish_time = current_time + 1;
                 p->state = COMPLETED;
                 cpu->current_process = NULL;
