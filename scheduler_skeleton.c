@@ -421,56 +421,70 @@ void handle_rr_quantum_expiry(Process *processes, CPU *cpus, int cpu_count, int 
 }
 
 /**
+ * Compare two processes for SRTF scheduling
+ * Returns true if p1 should be scheduled before p2 based on:
+ * 1. Remaining time (shorter is better)
+ * 2. Priority (higher is better, if remaining time is equal)
+ * 3. PID (lower is better, if priority is equal)
+ */
+bool priority_comparator(Process *p1, Process *p2) {
+    if (p1->remaining_time != p2->remaining_time) {
+        return p1->remaining_time < p2->remaining_time;
+    }
+    if (p1->priority != p2->priority) {
+        return p1->priority > p2->priority;
+    }
+    return p1->pid < p2->pid;
+}
+
+/**
  * Implement preemptive scheduling for SRTF
  */
 void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, int cpu_count, int current_time) {
     // TODO: Implement preemption logic for SRTF: replace running processes if a ready process is shorter
     // Consider priority as a tiebreaker when remaining times are equal
 
-
     (void)current_time;
-
-    // this o(n^2) is gonna pmo
-
-    // Edge case: WAIT processes in decreasing order of remaining time will preempt same CPU multiple times in one tick
-    bool preempted[cpu_count];
-    for (int i = 0; i < process_count; i++) {
-        Process *p = &processes[i];
+    // Finds the minimum remaining time process that is WAITING or READY and replaces
+    // a running process if it has less remaining time. Continues until no more replacements
+    // can be made.
+    bool found_replacement = true;
+    while (found_replacement) {
+        Process *min_process = NULL;
+        for (int i = 0; i < process_count; i++) {
+            Process *p = &processes[i];
         
-        // validate whether process is valid to work with
-        if (p->state != WAITING && p->state != READY) continue;
-        if (p->remaining_time <= 0) continue;
+            // validate whether process is valid to work with
+            if (p->state != WAITING && p->state != READY) continue;
+            if (p->remaining_time <= 0) continue;
 
+            if (min_process == NULL || priority_comparator(p, min_process)) {
+                min_process = p;
+            }
+        }
+
+        if (min_process == NULL) break; // no valid process found
+
+        // Try to find a running process to preempt
         for (int c = 0; c < cpu_count; c++) {
-            if (preempted[c]) continue;  // Skip, CPUs already preempted this tick
             CPU *cpu = &cpus[c];
             if (cpu->current_process == NULL) continue;
 
             Process *running = cpu->current_process;
             bool replace = false;
 
-            // if less, this works
-            if (p->remaining_time < running->remaining_time) replace = true;
-            else if (p->remaining_time == running->remaining_time) { // tie breakers
-                if (p->priority > running->priority) replace = true;
-                else if (p->priority == running->priority && p->pid < running->pid) replace = true;
-            }
-
-            if (replace) {
+            if (priority_comparator(min_process, running)) {
                 // pause current process
                 running->state = WAITING;
-                running->quantum_used = 0;
+                running->quantum_used = 0; // not rr but just in case
 
-                // make curr process p
-                p->state = RUNNING;
-                cpu->current_process = p;
-                preempted[c] = true;
                 
-                // IDK if this statement is true, imagine 2 processes on cpu that 
-                // just recently got their remaining time decremented and 2 processes
-                // in the waiting queue that are shorter than both, both should be swapped out.
-                // I suggest putting a break instead.
-                return; // apparently only one is possible so just return after done
+                min_process->state = RUNNING;
+                cpu->current_process = min_process;                
+                found_replacement = true;
+                break; // only replace one CPU at a time
+            } else {
+                found_replacement = false;
             }
         }
     }
