@@ -506,8 +506,8 @@ void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, in
                 victim = r;
                 victim_cpu = c;
             } else {
-                // pick the running process that is most deserving to be preempted:
-                // the one that is worst under the same ordering (remaining asc, priority desc, pid asc)
+                // pick the running process that is most deserving to be preempted
+                // the one that is worst under the same ordering
                 if (remaining_time_priority_comparator(victim, r)) {
                     victim = r;
                     victim_cpu = c;
