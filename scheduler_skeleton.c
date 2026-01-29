@@ -492,7 +492,7 @@ void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, in
     }
     if (best == NULL) return;
 
-    // Find a running process that should be preempted (the "worst" running relative to best)
+    // find a running process that should be preempted ~ p much the worst process
     int victim_cpu = -1;
     Process *victim = NULL;
 
@@ -500,7 +500,7 @@ void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, in
         Process *r = cpus[c].current_process;
         if (r == NULL) continue;
 
-        // Should best replace r?
+        // should best replace r?
         if (remaining_time_priority_comparator(best, r)) {
             if (victim == NULL) {
                 victim = r;
@@ -552,7 +552,7 @@ void assign_processes_to_idle_cpus(Process *processes, int process_count, CPU *c
         int chosen_idx = -1;
 
         if (algorithm == RR) {
-            // RR: just dequeue until you find a valid non-running, arrived, unfinished process
+            // RR, just dequeue until you find a valid non-running, arrived, unfinished process
             while (true) {
                 int idx = dequeue(ready_queue);
                 if (idx == -1) break;
@@ -568,7 +568,7 @@ void assign_processes_to_idle_cpus(Process *processes, int process_count, CPU *c
                 break;
             }
         } else {
-            // FCFS / SJF / SRTF: scan for best eligible candidate
+            // FCFS or SDF or SRTF: we don't need the cases statement we can just do the best candidate and we're chillin
             for (int i = 0; i < process_count; i++) {
                 Process *p = &processes[i];
 
@@ -580,15 +580,12 @@ void assign_processes_to_idle_cpus(Process *processes, int process_count, CPU *c
                 if (chosen == NULL) {
                     chosen = p;
                     chosen_idx = i;
-                } else {
+                }
+                else {
                     bool better = false;
-                    if (algorithm == FCFS) {
-                        better = arrival_priority_comparator(p, chosen);
-                    } else if (algorithm == SJF) {
-                        better = burst_time_priority_comparator(p, chosen);
-                    } else if (algorithm == SRTF) {
-                        better = remaining_time_priority_comparator(p, chosen);
-                    }
+                    if (algorithm == FCFS) better = arrival_priority_comparator(p, chosen);
+                    else if (algorithm == SJF) better = burst_time_priority_comparator(p, chosen);
+                    else if (algorithm == SRTF) better = remaining_time_priority_comparator(p, chosen);
 
                     if (better) {
                         chosen = p;
