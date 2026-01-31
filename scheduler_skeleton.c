@@ -612,7 +612,7 @@ void update_waiting_times(Process *processes, int process_count, int current_tim
     // The enum comment for WAITING (“not yet scheduled or arrived”) is misleading
     // ask prof if WAITING state is considered as arrived 
     for (int i = 0; i < process_count; i++) {
-        if (processes[i].state != RUNNING && processes[i].state != COMPLETED && processes[i].arrival_time < current_time)
+        if (processes[i].state != RUNNING && processes[i].state != COMPLETED && processes[i].arrival_time <= current_time)
             processes[i].waiting_time++;
     }
 }
