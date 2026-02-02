@@ -377,6 +377,12 @@ void load_processes(const char *filename, Process **processes_ptr, int *count) {
     printf("Loaded %d processes from %s\n", *count, filename);
 }
 
+static bool arrival_priority_comparator(Process *p1, Process *p2) {
+    if (p1->arrival_time != p2->arrival_time) return p1->arrival_time < p2->arrival_time;
+    if (p1->priority != p2->priority) return p1->priority > p2->priority;
+    return p1->pid < p2->pid;
+}
+
 /************************* SIMULATION COMPONENTS *************************/
 
 /**
@@ -409,12 +415,14 @@ void handle_rr_quantum_expiry(Process *processes, CPU *cpus, int cpu_count, int 
     for (int i = 0; i < cpu_count; i++) {
         CPU *cpu = &cpus[i];
         Process *p = cpu->current_process;
+        if (p == NULL) continue;
 
-        if (p != NULL && p->quantum_used >= time_quantum) {
-            int process_index = p - processes;  // Pointer arithmetic gives you the index
-            enqueue(ready_queue, process_index);
+        // only preempt if quantum expired and process still needs CPU
+        if (p->quantum_used >= time_quantum && p->remaining_time > 0) {
+            int idx = (int)(p - processes);
             p->quantum_used = 0;
             p->state = READY;
+            enqueue(ready_queue, idx);
             cpu->current_process = NULL;
         }
     }
@@ -471,35 +479,51 @@ void handle_srtf_preemption(Process *processes, int process_count, CPU *cpus, in
     // Finds the minimum remaining time process that is WAITING and replaces
     // a running process if it has less remaining time. Continues until no more replacements
     // can be made.
-    bool found_replacement = true;
-    while (found_replacement) {
-        Process *min_process = find_valid_min_remaining_process(processes, process_count, current_time);
+    Process *best = NULL;
+    for (int i = 0; i < process_count; i++) {
+        Process *p = &processes[i];
+        if (p->arrival_time > current_time) continue;
+        if (p->state == RUNNING || p->state == COMPLETED) continue;
+        if (p->remaining_time <= 0) continue;
 
-        if (min_process == NULL) break; // no valid process found
+        if (best == NULL || remaining_time_priority_comparator(p, best)) {
+            best = p;
+        }
+    }
+    if (best == NULL) return;
 
-        // Try to find a running process to preempt
-        for (int c = 0; c < cpu_count; c++) {
-            CPU *cpu = &cpus[c];
-            if (cpu->current_process == NULL) continue;
+    // find a running process that should be preempted ~ p much the worst process
+    int victim_cpu = -1;
+    Process *victim = NULL;
 
-            Process *running = cpu->current_process;
-            bool replace = false;
+    for (int c = 0; c < cpu_count; c++) {
+        Process *r = cpus[c].current_process;
+        if (r == NULL) continue;
 
-            if (remaining_time_priority_comparator(min_process, running)) {
-                // pause current process
-                running->state = WAITING;
-                running->quantum_used = 0; // not rr but just in case
-
-                
-                min_process->state = RUNNING;
-                cpu->current_process = min_process;                
-                found_replacement = true;
-                break; // only replace one CPU at a time
+        // should best replace r?
+        if (remaining_time_priority_comparator(best, r)) {
+            if (victim == NULL) {
+                victim = r;
+                victim_cpu = c;
             } else {
-                found_replacement = false;
+                // pick the running process that is most deserving to be preempted
+                // the one that is worst under the same ordering
+                if (remaining_time_priority_comparator(victim, r)) {
+                    victim = r;
+                    victim_cpu = c;
+                }
             }
         }
     }
+
+    if (victim_cpu == -1) return; // no running proc should be preempted
+
+    // do the preemption
+    victim->state = WAITING;
+    victim->quantum_used = 0;
+
+    best->state = RUNNING;
+    cpus[victim_cpu].current_process = best;
 }
 
 /**
@@ -510,56 +534,72 @@ void assign_processes_to_idle_cpus(Process *processes, int process_count, CPU *c
     // TODO: Select and assign processes to idle CPUs according to the chosen algorithm
     // Each algorithm has different process selection criteria
     // Be careful not to assign the same process to multiple CPUs
+    bool is_running[MAX_PROCESSES];
+    for (int i = 0; i < process_count; i++) is_running[i] = false;
+
+    for (int c = 0; c < cpu_count; c++) {
+        if (cpus[c].current_process != NULL) {
+            int idx = (int)(cpus[c].current_process - processes);
+            if (idx >= 0 && idx < process_count) is_running[idx] = true;
+        }
+    }
+
     for (int c = 0; c < cpu_count; c++) {
         CPU *cpu = &cpus[c];
+        if (cpu->current_process != NULL) continue; // only fill idle CPUs
 
-        if (cpu->current_process != NULL) continue; // CPU is busy
-        switch (algorithm) {
-            case FCFS:
-                for (int i = 0; i < process_count; i++) {
-                    Process *p = &processes[i];
-                    if (p->state == WAITING && p->arrival_time <= current_time) {
-                        p->state = RUNNING;
-                        cpu->current_process = p;
-                        break; // Assigned one process, move to next CPU
+        Process *chosen = NULL;
+        int chosen_idx = -1;
+
+        if (algorithm == RR) {
+            // RR, just dequeue until you find a valid non-running, arrived, unfinished process
+            while (true) {
+                int idx = dequeue(ready_queue);
+                if (idx == -1) break;
+
+                Process *p = &processes[idx];
+                if (p->arrival_time > current_time) continue;
+                if (p->state == COMPLETED) continue;
+                if (p->remaining_time <= 0) continue;
+                if (is_running[idx]) continue;
+
+                chosen = p;
+                chosen_idx = idx;
+                break;
+            }
+        } else {
+            // FCFS or SDF or SRTF: we don't need the cases statement we can just do the best candidate and we're chillin
+            for (int i = 0; i < process_count; i++) {
+                Process *p = &processes[i];
+
+                if (p->arrival_time > current_time) continue;
+                if (p->state == RUNNING || p->state == COMPLETED) continue;
+                if (p->remaining_time <= 0) continue;
+                if (is_running[i]) continue;
+
+                if (chosen == NULL) {
+                    chosen = p;
+                    chosen_idx = i;
+                }
+                else {
+                    bool better = false;
+                    if (algorithm == FCFS) better = arrival_priority_comparator(p, chosen);
+                    else if (algorithm == SJF) better = burst_time_priority_comparator(p, chosen);
+                    else if (algorithm == SRTF) better = remaining_time_priority_comparator(p, chosen);
+
+                    if (better) {
+                        chosen = p;
+                        chosen_idx = i;
                     }
                 }
-                break;
-            case RR:
-                int process_idx = dequeue(ready_queue);
-                if (process_idx != -1) {
-                    Process *p = &processes[process_idx];
-                    p->state = RUNNING;
-                    cpu->current_process = p;
-                }
-                break;
-            case SRTF:
-                Process *p = find_valid_min_remaining_process(processes, process_count, current_time);
-                if (p != NULL) {
-                    p->state = RUNNING;
-                    cpu->current_process = p;
-                }
-                break;
-            case SJF:
-                Process *shortest_process = NULL;
-                for (int i = 0; i < process_count; i++) {
-                    Process *p = &processes[i];
-                    if (p->remaining_time <= 0 || p->state != WAITING || p->arrival_time > current_time) continue; // skip invalid processes
-                    
-                    if (shortest_process == NULL || burst_time_priority_comparator(p, shortest_process)) {
-                        shortest_process = p;
-                    }
-                }
-
-                if (shortest_process != NULL) {
-                    shortest_process->state = RUNNING;
-                    cpu->current_process = shortest_process;
-                }
-                break;
-            default:
-                break;
+            }
         }
 
+        if (chosen != NULL) {
+            chosen->state = RUNNING;
+            cpu->current_process = chosen;
+            if (chosen_idx >= 0) is_running[chosen_idx] = true;
+        }
     }
 }
 
@@ -572,7 +612,7 @@ void update_waiting_times(Process *processes, int process_count, int current_tim
     // The enum comment for WAITING (“not yet scheduled or arrived”) is misleading
     // ask prof if WAITING state is considered as arrived 
     for (int i = 0; i < process_count; i++) {
-        if (processes[i].state != RUNNING && processes[i].state != COMPLETED && processes[i].arrival_time < current_time)
+        if (processes[i].state != RUNNING && processes[i].state != COMPLETED && processes[i].arrival_time <= current_time)
             processes[i].waiting_time++;
     }
 }
@@ -583,7 +623,8 @@ void update_waiting_times(Process *processes, int process_count, int current_tim
 void execute_processes(Process *processes, int process_count, CPU *cpus, int cpu_count,
                      int current_time, int *completed_count) {
     // TODO: Execute one time unit of each running process and track CPU idle/busy time
-    
+    (void) processes;
+    (void) process_count;
     for (int i = 0; i < cpu_count; i++) {
         CPU *cpu = &cpus[i];
 
