@@ -1,0 +1,5 @@
+# PID Arrival Burst Priority
+# Edge case: Round Robin quantum boundary conditions
+1 0 3 1
+2 1 3 1
+3 2 3 1

@@ -1,0 +1,7 @@
+# PID Arrival Burst Priority
+# Edge case: SRTF rapid preemption cascade
+1 0 10 1
+2 1 8 1
+3 2 6 1
+4 3 4 1
+5 4 2 1

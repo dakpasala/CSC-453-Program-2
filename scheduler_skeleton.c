@@ -368,6 +368,15 @@ void load_processes(const char *filename, Process **processes_ptr, int *count) {
             p->waiting_time = 0;
             p->quantum_used = 0;
             p->response_time = -1;
+            
+            // Handle zero burst time processes immediately
+            if (p->burst_time == 0) {
+                p->state = COMPLETED;
+                p->start_time = p->arrival_time;
+                p->finish_time = p->arrival_time;
+                p->response_time = 0;
+                p->waiting_time = 0;
+            }
             i++;
         }
     }
@@ -680,6 +689,13 @@ void simulate(Process *processes, int process_count, int cpu_count, Algorithm al
 
     int current_time = 0;
     int completed_count = 0;
+    
+    // Count processes that are already completed (zero-burst processes)
+    for (int i = 0; i < process_count; i++) {
+        if (processes[i].state == COMPLETED) {
+            completed_count++;
+        }
+    }
     
     // Display simulation header
     printf("\nStarting simulation with %s on %d CPU(s)%s\n", 
